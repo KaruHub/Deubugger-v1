@@ -1,0 +1,269 @@
+--$$\   $$\                              
+--$$ | $$  |                             
+--$$ |$$  / $$$$$$\   $$$$$$\  $$\   $$\ 
+--$$$$$  /  \____$$\ $$  __$$\ $$ |  $$ |
+--$$  $$<   $$$$$$$ |$$ |  \__|$$ |  $$ |
+--$$ |\$$\ $$  __$$ |$$ |      $$ |  $$ |
+--$$ | \$$\\$$$$$$$ |$$ |      \$$$$$$  |
+--\__|  \__|\_______|\__|       \______/ 
+                                       
+local Players = game:GetService("Players")
+local LogService = game:GetService("LogService")
+local Player = Players.LocalPlayer
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+-- GUI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+
+local ConsoleFrame = Instance.new("Frame")
+ConsoleFrame.Size = UDim2.new(0, 700, 0, 500)
+ConsoleFrame.Position = UDim2.new(0.5, -350, 0.1, 0)
+ConsoleFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+ConsoleFrame.BorderSizePixel = 0
+ConsoleFrame.ClipsDescendants = true
+ConsoleFrame.Active = true
+ConsoleFrame.Parent = ScreenGui
+
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 30)
+TopBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+TopBar.Name = "TopBar"
+TopBar.Parent = ConsoleFrame
+
+local dragInput, dragStart, startPos
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragStart = input.Position
+        startPos = ConsoleFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragStart = nil
+            end
+        end)
+    end
+end)
+
+TopBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragStart then
+        local delta = input.Position - dragStart
+        ConsoleFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -40, 1, 0)
+TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+TitleLabel.Font = Enum.Font.Code
+TitleLabel.Text = "Debugger v1"
+TitleLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+TitleLabel.TextSize = 14
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = TopBar
+
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Size = UDim2.new(0, 30, 1, 0)
+MinimizeButton.Position = UDim2.new(1, -30, 0, 0)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+MinimizeButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+MinimizeButton.Font = Enum.Font.Code
+MinimizeButton.TextSize = 16
+MinimizeButton.Text = "−"
+MinimizeButton.Parent = TopBar
+
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Size = UDim2.new(1, -10, 1, -80)
+ScrollFrame.Position = UDim2.new(0, 5, 0, 35)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.ScrollBarThickness = 6
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+ScrollFrame.Parent = ConsoleFrame
+
+local LogLayout = Instance.new("UIListLayout")
+LogLayout.Padding = UDim.new(0, 2)
+LogLayout.Parent = ScrollFrame
+
+local ControlBar = Instance.new("Frame")
+ControlBar.Size = UDim2.new(1, 0, 0, 40)
+ControlBar.Position = UDim2.new(0, 0, 1, -40)
+ControlBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+ControlBar.Parent = ConsoleFrame
+
+local ClearButton = Instance.new("TextButton")
+ClearButton.Size = UDim2.new(0, 100, 0, 30)
+ClearButton.Position = UDim2.new(0, 10, 0.5, -15)
+ClearButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+ClearButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+ClearButton.Font = Enum.Font.Code
+ClearButton.TextSize = 14
+ClearButton.Text = "Clear"
+ClearButton.Parent = ControlBar
+
+local CopyButton = Instance.new("TextButton")
+CopyButton.Size = UDim2.new(0, 120, 0, 30)
+CopyButton.Position = UDim2.new(0, 120, 0.5, -15)
+CopyButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+CopyButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+CopyButton.Font = Enum.Font.Code
+CopyButton.TextSize = 14
+CopyButton.Text = "Copy Selected"
+CopyButton.Visible = false
+CopyButton.Parent = ControlBar
+
+-- State Management
+local minimized = false
+local logCache = {}
+local selectedLogs = {}
+local messageColors = {
+    [Enum.MessageType.MessageInfo] = Color3.fromRGB(0, 255, 0),
+    [Enum.MessageType.MessageWarning] = Color3.fromRGB(255, 255, 0),
+    [Enum.MessageType.MessageError] = Color3.fromRGB(255, 0, 0),
+    [Enum.MessageType.MessageOutput] = Color3.fromRGB(200, 200, 200)
+}
+
+-- Fixed ASCII Art (3rd 'u' removed)
+local asciiArt = [[
+$$$$$$$\                      $$\                                                               $$\    $$\   $$\   
+$$  __$$\                     $$ |                                                              $$ |   $$ |$$$$ |  
+$$ |  $$ | $$$$$$\  $$\   $$\ $$$$$$$\  $$\   $$\  $$$$$$\   $$$$$$\   $$$$$$\   $$$$$$\        $$ |   $$ |\_$$ |  
+$$ |  $$ |$$  __$$\ $$ |  $$ |$$  __$$\ $$ |  $$ |$$  __$$\ $$  __$$\ $$  __$$\ $$  __$$\       \$$\  $$  |  $$ |  
+$$ |  $$ |$$$$$$$$ |$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ /  $$ |$$ /  $$ |$$$$$$$$ |$$ |  \__|       \$$\$$  /   $$ |  
+$$ |  $$ |$$   ____|$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |  $$ |$$ |  $$ |$$   ____|$$ |              \$$$  /    $$ |  
+$$$$$$$  |\$$$$$$$\ \$$$$$$  |$$$$$$$  |\$$$$$$  |\$$$$$$$ |\$$$$$$$ |\$$$$$$$\ $$ |               \$  /   $$$$$$\ 
+\_______/  \_______| \______/ \_______/  \______/  \____$$ | \____$$ | \_______|\__|                \_/    \______|
+                                                  $$\   $$ |$$\   $$ |                                             
+                                                  \$$$$$$  |\$$$$$$  |                                             
+                                                   \______/  \______/                                              
+]]
+
+-- Add ASCII Art
+local asciiArtLabels = {}
+local function addAsciiArt()
+    for line in asciiArt:gmatch("[^\r\n]+") do
+        local entry = Instance.new("TextLabel")
+        entry.Size = UDim2.new(1, -10, 0, 20)
+        entry.BackgroundTransparency = 1
+        entry.TextXAlignment = Enum.TextXAlignment.Left
+        entry.Font = Enum.Font.Code
+        entry.TextSize = 16
+        entry.Text = line
+        entry.TextColor3 = Color3.fromRGB(150, 150, 150)
+        entry.Parent = ScrollFrame
+        table.insert(asciiArtLabels, entry)
+    end
+end
+
+local function removeAsciiArt()
+    for _, label in ipairs(asciiArtLabels) do
+        label:Destroy()
+    end
+    asciiArtLabels = {}
+end
+
+-- Log Entries
+function createLogEntry(message, msgType, count)
+    local entry = Instance.new("TextButton")
+    entry.Size = UDim2.new(1, -10, 0, 20)
+    entry.BackgroundTransparency = 1
+    entry.TextXAlignment = Enum.TextXAlignment.Left
+    entry.Font = Enum.Font.Code
+    entry.TextSize = 16
+    entry.Text = "> " .. message .. (count > 1 and string.format(" (x%d)", count) or "")
+    entry.TextColor3 = messageColors[msgType]
+    entry.AutoButtonColor = false
+
+    entry.MouseButton1Click:Connect(function()
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl) then
+            -- Toggle selection
+            if selectedLogs[entry] then
+                selectedLogs[entry] = nil
+                entry.BackgroundTransparency = 1
+            else
+                selectedLogs[entry] = true
+                entry.BackgroundTransparency = 0.8
+                entry.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            end
+        else
+            -- Single select
+            for log in pairs(selectedLogs) do
+                log.BackgroundTransparency = 1
+            end
+            selectedLogs = { [entry] = true }
+            entry.BackgroundTransparency = 0.8
+            entry.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        end
+        CopyButton.Visible = next(selectedLogs) ~= nil
+    end)
+
+    return entry
+end
+
+-- Minimize Button
+MinimizeButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    TweenService:Create(ConsoleFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+        Size = minimized and UDim2.new(0, 700, 0, 30) or UDim2.new(0, 700, 0, 500)
+    }):Play()
+end)
+
+-- Clear Button
+ClearButton.MouseButton1Click:Connect(function()
+    for _, child in ipairs(ScrollFrame:GetChildren()) do
+        child:Destroy()
+    end
+    logCache = {}
+    selectedLogs = {}
+    CopyButton.Visible = false
+    removeAsciiArt()
+    addAsciiArt() -- Re-add ASCII art after clear
+end)
+
+-- Copy Button (FIXED)
+CopyButton.MouseButton1Click:Connect(function()
+    local textToCopy = ""
+    for log in pairs(selectedLogs) do
+        textToCopy = textToCopy .. log.Text .. "\n"
+    end
+    if textToCopy ~= "" then
+        setclipboard(textToCopy:sub(1, -2)) -- Remove last newline
+        CopyButton.Text = "Copied!"
+        wait(1)
+        CopyButton.Text = "Copy Selected"
+    end
+end)
+
+-- Log Handling
+LogService.MessageOut:Connect(function(message, msgType)
+    if #asciiArtLabels > 0 then
+        removeAsciiArt()
+    end
+
+    if logCache[message] then
+        logCache[message].count += 1
+        for _, entry in ipairs(ScrollFrame:GetChildren()) do
+            if entry:IsA("TextButton") and entry.Text:find(message) then
+                entry.Text = "> " .. message .. (logCache[message].count > 1 and string.format(" (x%d)", logCache[message].count) or "")
+                break
+            end
+        end
+    else
+        logCache[message] = {count = 1, type = msgType}
+        createLogEntry(message, msgType, 1).Parent = ScrollFrame
+    end
+end)
+
+-- Auto-scroll fix
+LogLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, LogLayout.AbsoluteContentSize.Y)
+end)
+
+-- Initialization
+addAsciiArt()
