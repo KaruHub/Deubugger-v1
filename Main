@@ -87,9 +87,20 @@ ScrollFrame.ScrollBarThickness = 6
 ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
 ScrollFrame.Parent = ConsoleFrame
 
-local LogLayout = Instance.new("UIListLayout")
-LogLayout.Padding = UDim.new(0, 2)
-LogLayout.Parent = ScrollFrame
+local LogTextBox = Instance.new("TextBox")
+LogTextBox.Size = UDim2.new(1, -10, 1, 0)
+LogTextBox.Position = UDim2.new(0, 5, 0, 0)
+LogTextBox.BackgroundTransparency = 1
+LogTextBox.TextXAlignment = Enum.TextXAlignment.Left
+LogTextBox.TextYAlignment = Enum.TextYAlignment.Top
+LogTextBox.TextColor3 = Color3.fromRGB(200, 200, 200)
+LogTextBox.Font = Enum.Font.Code
+LogTextBox.TextSize = 16
+LogTextBox.MultiLine = true
+LogTextBox.TextWrapped = true
+LogTextBox.ClearTextOnFocus = false
+LogTextBox.Text = ""
+LogTextBox.Parent = ScrollFrame
 
 local ControlBar = Instance.new("Frame")
 ControlBar.Size = UDim2.new(1, 0, 0, 40)
@@ -114,23 +125,51 @@ CopyButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 CopyButton.TextColor3 = Color3.fromRGB(200, 200, 200)
 CopyButton.Font = Enum.Font.Code
 CopyButton.TextSize = 14
-CopyButton.Text = "Copy Selected"
-CopyButton.Visible = false
+CopyButton.Text = "Copy Text"
 CopyButton.Parent = ControlBar
 
 -- State Management
 local minimized = false
 local logCache = {}
-local selectedLogs = {}
-local messageColors = {
-    [Enum.MessageType.MessageInfo] = Color3.fromRGB(0, 255, 0),
-    [Enum.MessageType.MessageWarning] = Color3.fromRGB(255, 255, 0),
-    [Enum.MessageType.MessageError] = Color3.fromRGB(255, 0, 0),
-    [Enum.MessageType.MessageOutput] = Color3.fromRGB(200, 200, 200)
-}
 
--- Fixed ASCII Art (3rd 'u' removed)
-local asciiArt = [[
+-- Minimize Button
+MinimizeButton.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    TweenService:Create(ConsoleFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+        Size = minimized and UDim2.new(0, 700, 0, 30) or UDim2.new(0, 700, 0, 500)
+    }):Play()
+end)
+
+-- Clear Button
+ClearButton.MouseButton1Click:Connect(function()
+    LogTextBox.Text = ""
+    logCache = {}
+end)
+
+-- Copy Button
+CopyButton.MouseButton1Click:Connect(function()
+    setclipboard(LogTextBox.Text)
+    CopyButton.Text = "Copied!"
+    wait(1)
+    CopyButton.Text = "Copy Text"
+end)
+
+-- Log Handling
+LogService.MessageOut:Connect(function(message, msgType)
+    if logCache[message] then
+        logCache[message].count += 1
+        LogTextBox.Text = LogTextBox.Text .. "\n> " .. message .. " (x" .. logCache[message].count .. ")"
+    else
+        logCache[message] = {count = 1, type = msgType}
+        LogTextBox.Text = LogTextBox.Text .. "\n> " .. message
+    end
+
+    -- Auto-scroll to bottom
+    ScrollFrame.CanvasPosition = Vector2.new(0, LogTextBox.TextBounds.Y)
+end)
+
+-- Initialization
+LogTextBox.Text = [[
 $$$$$$$\                      $$\                                                               $$\    $$\   $$\   
 $$  __$$\                     $$ |                                                              $$ |   $$ |$$$$ |  
 $$ |  $$ | $$$$$$\  $$\   $$\ $$$$$$$\  $$\   $$\  $$$$$$\   $$$$$$\   $$$$$$\   $$$$$$\        $$ |   $$ |\_$$ |  
@@ -143,127 +182,3 @@ $$$$$$$  |\$$$$$$$\ \$$$$$$  |$$$$$$$  |\$$$$$$  |\$$$$$$$ |\$$$$$$$ |\$$$$$$$\ 
                                                   \$$$$$$  |\$$$$$$  |                                             
                                                    \______/  \______/                                              
 ]]
-
--- Add ASCII Art
-local asciiArtLabels = {}
-local function addAsciiArt()
-    for line in asciiArt:gmatch("[^\r\n]+") do
-        local entry = Instance.new("TextLabel")
-        entry.Size = UDim2.new(1, -10, 0, 20)
-        entry.BackgroundTransparency = 1
-        entry.TextXAlignment = Enum.TextXAlignment.Left
-        entry.Font = Enum.Font.Code
-        entry.TextSize = 16
-        entry.Text = line
-        entry.TextColor3 = Color3.fromRGB(150, 150, 150)
-        entry.Parent = ScrollFrame
-        table.insert(asciiArtLabels, entry)
-    end
-end
-
-local function removeAsciiArt()
-    for _, label in ipairs(asciiArtLabels) do
-        label:Destroy()
-    end
-    asciiArtLabels = {}
-end
-
--- Log Entries
-function createLogEntry(message, msgType, count)
-    local entry = Instance.new("TextButton")
-    entry.Size = UDim2.new(1, -10, 0, 20)
-    entry.BackgroundTransparency = 1
-    entry.TextXAlignment = Enum.TextXAlignment.Left
-    entry.Font = Enum.Font.Code
-    entry.TextSize = 16
-    entry.Text = "> " .. message .. (count > 1 and string.format(" (x%d)", count) or "")
-    entry.TextColor3 = messageColors[msgType]
-    entry.AutoButtonColor = false
-
-    entry.MouseButton1Click:Connect(function()
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl) then
-            -- Toggle selection
-            if selectedLogs[entry] then
-                selectedLogs[entry] = nil
-                entry.BackgroundTransparency = 1
-            else
-                selectedLogs[entry] = true
-                entry.BackgroundTransparency = 0.8
-                entry.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-            end
-        else
-            -- Single select
-            for log in pairs(selectedLogs) do
-                log.BackgroundTransparency = 1
-            end
-            selectedLogs = { [entry] = true }
-            entry.BackgroundTransparency = 0.8
-            entry.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-        end
-        CopyButton.Visible = next(selectedLogs) ~= nil
-    end)
-
-    return entry
-end
-
--- Minimize Button
-MinimizeButton.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    TweenService:Create(ConsoleFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
-        Size = minimized and UDim2.new(0, 700, 0, 30) or UDim2.new(0, 700, 0, 500)
-    }):Play()
-end)
-
--- Clear Button
-ClearButton.MouseButton1Click:Connect(function()
-    for _, child in ipairs(ScrollFrame:GetChildren()) do
-        child:Destroy()
-    end
-    logCache = {}
-    selectedLogs = {}
-    CopyButton.Visible = false
-    removeAsciiArt()
-    addAsciiArt() -- Re-add ASCII art after clear
-end)
-
--- Copy Button (FIXED)
-CopyButton.MouseButton1Click:Connect(function()
-    local textToCopy = ""
-    for log in pairs(selectedLogs) do
-        textToCopy = textToCopy .. log.Text .. "\n"
-    end
-    if textToCopy ~= "" then
-        setclipboard(textToCopy:sub(1, -2)) -- Remove last newline
-        CopyButton.Text = "Copied!"
-        wait(1)
-        CopyButton.Text = "Copy Selected"
-    end
-end)
-
--- Log Handling
-LogService.MessageOut:Connect(function(message, msgType)
-    if #asciiArtLabels > 0 then
-        removeAsciiArt()
-    end
-
-    if logCache[message] then
-        logCache[message].count += 1
-        for _, entry in ipairs(ScrollFrame:GetChildren()) do
-            if entry:IsA("TextButton") and entry.Text:find(message) then
-                entry.Text = "> " .. message .. (logCache[message].count > 1 and string.format(" (x%d)", logCache[message].count) or "")
-                break
-            end
-        end
-    else
-        logCache[message] = {count = 1, type = msgType}
-        createLogEntry(message, msgType, 1).Parent = ScrollFrame
-    end
-end)
-
--- Auto-scroll fix
-LogLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, LogLayout.AbsoluteContentSize.Y)
-end)
-
--- Initialization
-addAsciiArt()
